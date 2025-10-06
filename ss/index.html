@@ -1,0 +1,132 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SS — 3 Lane Runner</title>
+  <style>
+    html, body { margin:0; height:100%; background:#0c0f18; color:#cde; font:14px system-ui, -apple-system, Segoe UI, Roboto, Arial; overflow:hidden; }
+    #hud { position:fixed; top:10px; left:10px; background:rgba(0,0,0,.35); padding:8px 10px; border-radius:8px; }
+    b { color:#fff }
+    canvas { display:block; width:100vw; height:100vh; }
+  </style>
+</head>
+<body>
+<div id="hud"><b>SS</b> runner, arrows to move, up to jump, down to slide, R to restart, Score: <span id="sc">0</span></div>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ct = cv.getContext('2d');
+  const sEl = document.getElementById('sc');
+  let W=innerWidth, H=innerHeight;
+  function resize(){ W=innerWidth; H=innerHeight; cv.width=W; cv.height=H; }
+  resize(); addEventListener('resize', resize);
+
+  const lanes = [-1, 0, 1]; // -1 left, 0 mid, 1 right
+  const laneX = i => W/2 + i * Math.min(140, W*0.18);
+  let speed = 7, score=0, alive=true, t=0;
+
+  const player = {lane:0, x:laneX(0), y:H-120, vy:0, w:40, h:60, state:'run', slideT:0};
+  const obs = []; // {lane, x, y, w, h, type: 'low'/'high'}
+  function spawn(){
+    const lane = lanes[Math.floor(Math.random()*lanes.length)];
+    const type = Math.random()<0.5 ? 'low' : 'high';
+    const y = type==='low' ? H-90 : H-170;
+    const h = type==='low' ? 40 : 100;
+    obs.push({lane, x: laneX(lane), y, w:50, h, type});
+  }
+
+  function reset(){
+    obs.length=0; speed=7; score=0; alive=true; t=0;
+    player.lane=0; player.x=laneX(0); player.y=H-120; player.vy=0; player.state='run'; player.slideT=0;
+    for (let i=0;i<8;i++){ spawn(); obs[i].y -= i*220; }
+  }
+
+  addEventListener('keydown', e=>{
+    const k = e.key.toLowerCase();
+    if (!alive && k==='r'){ reset(); return; }
+    if (k==='arrowleft'){ player.lane = Math.max(-1, player.lane-1); }
+    if (k==='arrowright'){ player.lane = Math.min( 1, player.lane+1); }
+    if (k==='arrowup' && player.state==='run'){ player.vy = -14; player.state='jump'; }
+    if (k==='arrowdown' && player.state==='run'){ player.state='slide'; player.slideT = 18; }
+  });
+
+  function drawTrack(){
+    // road
+    ct.fillStyle = '#16243a'; ct.fillRect(0,0,W,H);
+    // lane markers perspective
+    ct.strokeStyle = '#365b8f'; ct.lineWidth = 2;
+    for (let i=-1;i<=1;i++){
+      const x = laneX(i);
+      ct.beginPath(); ct.moveTo(x,0); ct.lineTo(x,H); ct.stroke();
+    }
+    // horizon
+    ct.fillStyle='#0a1322'; ct.fillRect(0,0,W,80);
+  }
+
+  function rect(x,y,w,h,color){ ct.fillStyle=color; ct.fillRect(x-w/2,y-h,w,h); }
+
+  function step(){
+    t++; if (!alive){ drawTrack(); rect(player.x,player.y,player.w,player.h,'#4dd0ff'); sEl.textContent='crashed, press R'; requestAnimationFrame(step); return; }
+
+    drawTrack();
+
+    // Smooth lane move
+    player.x += (laneX(player.lane) - player.x) * 0.25;
+
+    // Jump and gravity
+    if (player.state==='jump'){
+      player.y += player.vy;
+      player.vy += 0.9;
+      if (player.y >= H-120){ player.y = H-120; player.vy=0; player.state='run'; }
+    }
+
+    // Slide timer
+    if (player.state==='slide'){
+      player.slideT--;
+      if (player.slideT<=0) player.state='run';
+    }
+
+    // Draw player
+    const ph = player.state==='slide' ? 30 : player.h;
+    rect(player.x, player.y + (player.state==='slide'? 30:0), player.w, ph, '#4dd0ff');
+
+    // Obstacles move toward player
+    for (const o of obs){
+      o.y += speed;
+      // recycle
+      if (o.y > H+120){
+        o.lane = lanes[Math.floor(Math.random()*lanes.length)];
+        o.x = laneX(o.lane);
+        o.type = Math.random()<0.5 ? 'low' : 'high';
+        o.h = o.type==='low' ? 40 : 100;
+        o.y -= H + 600 + Math.random()*400;
+      }
+      rect(o.x, o.y, o.w, o.h, '#ff6b6b');
+      // collision
+      const pw = player.w, pTop = player.y - (player.state==='slide'? 0: ph);
+      const pBottom = player.y;
+      const pLeft = player.x - pw/2, pRight = player.x + pw/2;
+      const oTop = o.y - o.h, oBottom = o.y, oLeft = o.x - o.w/2, oRight = o.x + o.w/2;
+      const overlap = !(pRight < oLeft || pLeft > oRight || pBottom < oTop || pTop > oBottom);
+      if (overlap){
+        if (o.type==='low' && player.state==='jump'){ /* safe */ }
+        else if (o.type==='high' && player.state==='slide'){ /* safe */ }
+        else { alive=false; }
+      }
+    }
+
+    // Speed ramp and score
+    speed += 0.002;
+    score += speed*0.2;
+    sEl.textContent = Math.floor(score);
+
+    requestAnimationFrame(step);
+  }
+
+  reset(); step();
+})();
+</script>
+</body>
+</html>

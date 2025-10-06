@@ -1,0 +1,142 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FB — Retro Bowl Style Mini</title>
+  <style>
+    html, body { margin:0; height:100%; background:#0f1320; color:#cde; font:14px system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #ui { position:fixed; top:10px; left:10px; background:rgba(0,0,0,.35); padding:8px 10px; border-radius:8px; }
+    canvas { display:block; width:100vw; height:100vh; }
+    b { color:#fff }
+  </style>
+</head>
+<body>
+<div id="ui">
+  <b>FB</b> retro bowl style mini, click to snap, drag and release to throw, R to reset, Score: <span id="s">0</span>
+</div>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const sEl = document.getElementById('s');
+  let W=innerWidth, H=innerHeight;
+  function resize(){ W=innerWidth; H=innerHeight; canvas.width=W; canvas.height=H; }
+  resize(); addEventListener('resize', resize);
+
+  // Field
+  function drawField(){
+    ctx.fillStyle = '#155e30'; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle = '#b7ffc2'; ctx.lineWidth = 2;
+    for (let y=H-100; y>0; y-=80){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  }
+
+  // Entities
+  const QB = {x: W*0.15, y: H-120, r: 16, vx:0, vy:0};
+  const WRs = [
+    {x: W*0.35, y: H-200, r: 14, vx:2.2, vy:0, alive:true},
+    {x: W*0.55, y: H-280, r: 14, vx:2.0, vy:0, alive:true},
+    {x: W*0.75, y: H-240, r: 14, vx:1.9, vy:0, alive:true},
+  ];
+  const DEF = Array.from({length:7}, (_,i)=>({x: W*0.5 + i*60, y: 140+ i%2*80, r:16, vx:-0.6 - Math.random()*0.3, vy:0}));
+  let ball = {x: QB.x, y: QB.y-20, vx:0, vy:0, inAir:false};
+  let snapped=false, dragging=false, aim={x:0,y:0}, score=0, over=false;
+
+  function reset(){
+    QB.x = W*0.15; QB.y = H-120;
+    WRs[0].x=W*0.35; WRs[0].y=H-200; WRs[0].vx=2.2; WRs[0].alive=true;
+    WRs[1].x=W*0.55; WRs[1].y=H-280; WRs[1].vx=2.0; WRs[1].alive=true;
+    WRs[2].x=W*0.75; WRs[2].y=H-240; WRs[2].vx=1.9; WRs[2].alive=true;
+    for (const d of DEF){ d.x = W*0.5 + Math.random()*W*0.4; d.vx = -0.6 - Math.random()*0.4; }
+    ball = {x: QB.x, y: QB.y-20, vx:0, vy:0, inAir:false};
+    snapped=false; dragging=false; over=false; score=0;
+    sEl.textContent = score;
+  }
+
+  addEventListener('keydown', e=>{ if (e.key.toLowerCase()==='r') reset(); });
+
+  canvas.addEventListener('mousedown', e=>{
+    if (!snapped){ snapped=true; return; }
+    dragging=true; aim.x=e.clientX; aim.y=e.clientY;
+  });
+  addEventListener('mousemove', e=>{ if (dragging){ aim.x=e.clientX; aim.y=e.clientY; } });
+  addEventListener('mouseup', e=>{
+    if (!dragging) return;
+    dragging=false;
+    const dx = aim.x - QB.x, dy = aim.y - QB.y;
+    const mag = Math.hypot(dx,dy) || 1;
+    const power = Math.min(22, mag/8 + 10);
+    ball.x = QB.x; ball.y = QB.y;
+    ball.vx = dx/mag * power; ball.vy = dy/mag * power;
+    ball.inAir = true;
+  });
+
+  function circle(x,y,r, color){ ctx.fillStyle=color; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); }
+  function text(t,x,y){ ctx.fillStyle='#fff'; ctx.font='16px system-ui, -apple-system, Segoe UI, Roboto, Arial'; ctx.fillText(t,x,y); }
+
+  function step(){
+    drawField();
+
+    // Receivers move
+    for (const w of WRs){
+      if (!w.alive) continue;
+      w.x += w.vx;
+      if (w.x > W-40){ w.vx *= -1; }
+      if (w.x < 40){ w.vx *= -1; }
+    }
+
+    // Defenders close in
+    for (const d of DEF){
+      d.x += d.vx;
+      if (snapped && Math.hypot(d.x-QB.x, d.y-QB.y) < d.r + QB.r){
+        over = true;
+      }
+      circle(d.x,d.y,d.r,'#d9534f');
+    }
+
+    // Draw QB
+    circle(QB.x, QB.y, QB.r, '#4dd0ff');
+
+    // Draw receivers
+    for (const w of WRs){
+      if (!w.alive) continue;
+      circle(w.x, w.y, w.r, '#ffd54f');
+    }
+
+    // Ball physics
+    if (ball.inAir){
+      ball.x += ball.vx;
+      ball.y += ball.vy;
+      // slight gravity arc
+      ball.vy -= 0.15;
+      // Catch check
+      for (const w of WRs){
+        if (!w.alive) continue;
+        if (Math.hypot(ball.x-w.x, ball.y-w.y) < w.r+6){
+          score += 7;
+          sEl.textContent = score;
+          w.alive=false;
+          ball.inAir=false;
+        }
+      }
+      // Out of bounds
+      if (ball.x< -50 || ball.x> W+50 || ball.y< -50 || ball.y> H+50){
+        ball.inAir=false;
+      }
+    }
+    // Draw ball
+    circle(ball.x, ball.y, 6, '#fff');
+
+    // UI hints
+    if (!snapped){ text('Click to snap', QB.x-40, QB.y-30); }
+    else if (!ball.inAir){ text('Drag then release to throw', QB.x-80, QB.y-30); }
+    if (over){ text('Sacked, press R', QB.x-40, QB.y-50); }
+
+    requestAnimationFrame(step);
+  }
+  reset(); step();
+})();
+</script>
+</body>
+</html>

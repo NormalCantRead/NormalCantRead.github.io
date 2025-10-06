@@ -1,0 +1,157 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SL — Slope Clone</title>
+  <style>
+    html, body { margin:0; height:100%; background:#0b0f1a; overflow:hidden; }
+    #info { position:fixed; top:10px; left:10px; color:#cde; font:14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial; background:rgba(0,0,0,.35); padding:8px 10px; border-radius:8px; }
+    #info b { color:#fff }
+    canvas { display:block }
+  </style>
+</head>
+<body>
+<div id="info">
+  <b>SL</b> slope-like, A/D or ←/→ to steer, R to reset, P to pause
+  <div>Score: <span id="score">0</span></div>
+</div>
+<script src="https://unpkg.com/three@0.156.1/build/three.min.js"></script>
+<script>
+(() => {
+  const sEl = document.getElementById('score');
+  let w = window.innerWidth, h = window.innerHeight;
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0b0f1a, 20, 200);
+  const camera = new THREE.PerspectiveCamera(70, w/h, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(w,h);
+  renderer.setPixelRatio(devicePixelRatio);
+  document.body.appendChild(renderer.domElement);
+
+  // Lights
+  const amb = new THREE.AmbientLight(0x88aaff, 0.5); scene.add(amb);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0); dir.position.set(1,2,1); scene.add(dir);
+
+  // Ground plane tilted
+  const planeGeo = new THREE.PlaneGeometry(40, 2000, 10, 200);
+  const planeMat = new THREE.MeshLambertMaterial({color:0x111a2a, wireframe:false});
+  const plane = new THREE.Mesh(planeGeo, planeMat);
+  plane.rotation.x = -Math.PI/2.2; // tilt
+  plane.position.z = -200;
+  scene.add(plane);
+
+  // Lane lines
+  const lineMat = new THREE.LineBasicMaterial({color:0x224477});
+  for (let x of [-10, 0, 10]) {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x,0,0),
+      new THREE.Vector3(x,-0.01,-2000)
+    ]);
+    const ln = new THREE.Line(geo, lineMat);
+    ln.rotation.x = -Math.PI/2.2;
+    ln.position.z = -200;
+    scene.add(ln);
+  }
+
+  // Player ball
+  const ball = new THREE.Mesh(
+    new THREE.SphereGeometry(1.2, 24, 24),
+    new THREE.MeshStandardMaterial({color:0x4dd0ff, roughness:0.4, metalness:0.2})
+  );
+  ball.position.set(0, 3, 4);
+  scene.add(ball);
+
+  // Obstacles pool
+  const obsGeo = new THREE.BoxGeometry(3,3,3);
+  const obsMat = new THREE.MeshStandardMaterial({color:0xff4d6d, roughness:0.5});
+  const obstacles = [];
+  function spawnRow(z){
+    for (let lane of [-10,0,10]){
+      if (Math.random() < 0.55) continue;
+      const m = new THREE.Mesh(obsGeo, obsMat);
+      m.position.set(lane, 1.5, z);
+      m.userData.active = true;
+      scene.add(m);
+      obstacles.push(m);
+    }
+  }
+  for (let i=0;i<80;i++) spawnRow(-i*20 - 40);
+
+  let vx = 0, targetLane = 0, speed = 0.5, alive = true, paused = false, score=0, zProgress=0;
+
+  function reset(){
+    for (const o of obstacles) scene.remove(o);
+    obstacles.length = 0;
+    for (let i=0;i<80;i++) spawnRow(-i*20 - 40);
+    ball.position.set(0,3,4);
+    vx = 0; targetLane = 0; speed = 0.5; alive = true; paused=false; score=0; zProgress=0;
+  }
+
+  function handleKeys(e,down){
+    const k = e.key.toLowerCase();
+    if (k === 'arrowleft' || k === 'a'){ targetLane = Math.max(-10, targetLane-10); }
+    if (k === 'arrowright' || k === 'd'){ targetLane = Math.min(10, targetLane+10); }
+    if (k === 'r' && down===true) reset();
+    if (k === 'p' && down===true) paused = !paused;
+  }
+  window.addEventListener('keydown', e=>handleKeys(e,true));
+
+  function update(){
+    if (!alive || paused) return;
+    // Move ball forward by moving world backward
+    zProgress += speed;
+    plane.position.z += speed;
+    if (plane.position.z > 0) plane.position.z = -200;
+
+    // Obstacles move toward camera
+    for (const o of obstacles){
+      o.position.z += speed;
+    }
+    // Recycle far ones
+    for (const o of obstacles){
+      if (o.position.z > 10){
+        o.position.z -= 1600;
+        o.position.x = [-10,0,10][Math.floor(Math.random()*3)];
+      }
+    }
+
+    // Lane smoothing
+    const dx = targetLane - ball.position.x;
+    ball.position.x += dx * 0.12;
+    // gravity ish
+    ball.position.y = 3 + Math.sin(zProgress*0.08)*0.4;
+
+    // Collision
+    for (const o of obstacles){
+      if (!o.userData.active) continue;
+      if (Math.abs(o.position.x - ball.position.x) < 2 &&
+          Math.abs(o.position.z - 2) < 2.2){
+        alive = false;
+        sEl.textContent = "crashed, press R";
+      }
+    }
+    // Speed and score
+    speed = Math.min(1.9, speed + 0.0006);
+    score += speed*0.1;
+    sEl.textContent = alive ? Math.floor(score) : sEl.textContent;
+  }
+
+  function frame(){
+    update();
+    camera.position.set(ball.position.x, 6.5, 10);
+    camera.lookAt(ball.position.x, 1, 0);
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  frame();
+
+  window.addEventListener('resize', ()=>{
+    w = innerWidth; h = innerHeight;
+    renderer.setSize(w,h);
+    camera.aspect = w/h; camera.updateProjectionMatrix();
+  });
+})();
+</script>
+</body>
+</html>
